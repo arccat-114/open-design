@@ -64,6 +64,17 @@ function hasValidManifestSidecar(fullPath: string): boolean {
   return parsePersistedManifest(raw, path.basename(fullPath)) !== null;
 }
 
+async function hasValidManifestSidecarAsync(fullPath: string): Promise<boolean> {
+  if (isManifestSidecarPath(fullPath)) return false;
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(manifestSidecarFor(fullPath), 'utf8');
+  } catch {
+    return false;
+  }
+  return parsePersistedManifest(raw, path.basename(fullPath)) !== null;
+}
+
 const RENDER_DEPENDENCY_EXTENSIONS = new Set([
   '.css',
   '.js',
@@ -203,17 +214,18 @@ export function snapshotProjectArtifacts(rootDir: string): ArtifactSnapshot {
         const full = path.join(dir, entry.name);
         const tracked = isTrackedRunFile(entry.name);
         const manifestBacked = !tracked && hasValidManifestSidecar(full);
-        if (tracked ? trackedCount >= MAX_FILES : otherCount >= MAX_OTHER_FILES) continue;
+        const trackedForBudget = tracked || manifestBacked;
+        if (trackedForBudget ? trackedCount >= MAX_FILES : otherCount >= MAX_OTHER_FILES) continue;
         try {
           const stat = fs.statSync(full);
-          const fingerprint = tracked || manifestBacked
+          const fingerprint = trackedForBudget
             ? fingerprintFile(full, stat.size, stat.mtimeMs)
             : statOnlyFingerprint(stat.size, stat.mtimeMs);
           snapshot.set(
             full,
             manifestBacked ? { ...fingerprint, manifestBacked } : fingerprint,
           );
-          if (tracked || manifestBacked) trackedCount += 1;
+          if (trackedForBudget) trackedCount += 1;
           else otherCount += 1;
         } catch {
           // Race (file removed mid-walk) or permission error — skip.
@@ -251,10 +263,11 @@ export async function snapshotProjectArtifactsAsync(rootDir: string): Promise<Ar
       } else if (entry.isFile() && !isManifestSidecarPath(entry.name)) {
         const full = path.join(dir, entry.name);
         const tracked = isTrackedRunFile(entry.name);
-        const manifestBacked = !tracked && hasValidManifestSidecar(full);
-        if (tracked ? trackedCount >= MAX_FILES : otherCount >= MAX_OTHER_FILES) continue;
-        files.push({ full, tracked: tracked || manifestBacked, manifestBacked });
-        if (tracked || manifestBacked) trackedCount += 1;
+        const manifestBacked = !tracked && await hasValidManifestSidecarAsync(full);
+        const trackedForBudget = tracked || manifestBacked;
+        if (trackedForBudget ? trackedCount >= MAX_FILES : otherCount >= MAX_OTHER_FILES) continue;
+        files.push({ full, tracked: trackedForBudget, manifestBacked });
+        if (trackedForBudget) trackedCount += 1;
         else otherCount += 1;
       }
     }

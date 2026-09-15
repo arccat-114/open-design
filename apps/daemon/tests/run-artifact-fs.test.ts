@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'vitest';
+import { test, vi } from 'vitest';
 import {
   createRunArtifactBaselines,
   diffRunArtifacts,
@@ -13,6 +13,13 @@ import {
 
 function tmpProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'od-artifact-fs-'));
+}
+
+function writeNumberedFiles(root: string, prefix: string, extension: string, count: number): void {
+  for (let index = 0; index < count; index += 1) {
+    const suffix = index.toString().padStart(4, '0');
+    fs.writeFileSync(path.join(root, `${prefix}-${suffix}${extension}`), 'x');
+  }
 }
 
 test('the async snapshot preserves the synchronous snapshot contract', async () => {
@@ -372,6 +379,65 @@ test('a manifest-backed Markdown export counts as a run artifact', async () => {
     renderDependencyTouchedPaths: [],
     supportingMediaTouched: 0,
   });
+});
+
+test('the async manifest check does not use synchronous sidecar reads', async () => {
+  const root = tmpProject();
+  const doc = path.join(root, 'async-export.md');
+  fs.writeFileSync(doc, '# export');
+  fs.writeFileSync(`${doc}.artifact.json`, validMdManifest('async-export.md'));
+
+  const readFileSync = vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+    throw new Error('async snapshot must not use readFileSync');
+  });
+  try {
+    const snapshot = await snapshotProjectArtifactsAsync(root);
+    assert.equal(snapshot.get(doc)?.manifestBacked, true);
+  } finally {
+    readFileSync.mockRestore();
+  }
+});
+
+test('manifest classification is applied before the snapshot budgets', async () => {
+  const otherRoot = tmpProject();
+  writeNumberedFiles(otherRoot, 'ordinary', '.txt', 5000);
+  const manifestBackedDoc = path.join(otherRoot, 'z-manifest-export.md');
+  fs.writeFileSync(manifestBackedDoc, '# export');
+  fs.writeFileSync(
+    `${manifestBackedDoc}.artifact.json`,
+    validMdManifest('z-manifest-export.md'),
+  );
+
+  for (const snapshot of [
+    snapshotProjectArtifacts(otherRoot),
+    await snapshotProjectArtifactsAsync(otherRoot),
+  ]) {
+    assert.equal(
+      snapshot.get(manifestBackedDoc)?.manifestBacked,
+      true,
+      'a manifest-backed file must not be rejected by the ordinary-file budget',
+    );
+  }
+
+  const trackedRoot = tmpProject();
+  writeNumberedFiles(trackedRoot, 'tracked', '.html', 5000);
+  const overBudgetDoc = path.join(trackedRoot, 'z-manifest-export.md');
+  fs.writeFileSync(overBudgetDoc, '# export');
+  fs.writeFileSync(
+    `${overBudgetDoc}.artifact.json`,
+    validMdManifest('z-manifest-export.md'),
+  );
+
+  for (const snapshot of [
+    snapshotProjectArtifacts(trackedRoot),
+    await snapshotProjectArtifactsAsync(trackedRoot),
+  ]) {
+    assert.equal(
+      snapshot.get(overBudgetDoc),
+      undefined,
+      'a manifest-backed file must not bypass the tracked-file budget',
+    );
+  }
 });
 
 test('a Markdown file without a valid manifest sidecar stays untracked', () => {
