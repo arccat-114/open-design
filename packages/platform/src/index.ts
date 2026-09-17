@@ -28,16 +28,23 @@ export {
 
 export type {
   ProcessSnapshot,
+  ProcessSnapshotOptions,
   ProcessStampContract,
   ProcessStampField,
   ProcessStampShape,
   SpawnProcessRequest,
+  StampedProcessInvocationSnapshot,
+  StampedProcessSetInvocationSnapshot,
   StampedProcessMatchCriteria,
   StopProcessesOptions,
   StopProcessesResult,
 } from "./process.js";
 export {
   collectProcessTreePids,
+  captureProcessSnapshot,
+  captureProcessSnapshotsByPids,
+  captureStampedProcessSnapshot,
+  captureStampedProcessSetSnapshot,
   createProcessStampArgs,
   isProcessAlive,
   listProcessSnapshots,
@@ -47,6 +54,8 @@ export {
   readFlagValue,
   readProcessStamp,
   readProcessStampFromCommand,
+  signalProcesses,
+  selectOwnedProcessTree,
   spawnBackgroundProcess,
   spawnLoggedProcess,
   stopProcesses,
